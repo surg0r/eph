@@ -1,0 +1,513 @@
+// Distributed under the MIT software license, see the accompanying
+// file LICENSE or http://www.opensource.org/licenses/mit-license.php.
+
+syntax = "proto3";
+
+package qrl;
+
+// TODO: Avoid using timestamp until the github issue is fixed
+// import "google/protobuf/timestamp.proto";
+message Timestamp
+{
+    int64 seconds = 1;
+    int32 nanos = 2;
+}
+
+////////////////////////////
+////////////////////////////
+////////////////////////////
+//////     API       ///////
+////////////////////////////
+////////////////////////////
+////////////////////////////
+
+// This service describes the P2P API
+service P2PAPI
+{
+    rpc GetNodeState (GetNodeStateReq) returns (GetNodeStateResp);
+    rpc GetKnownPeers (GetKnownPeersReq) returns (GetKnownPeersResp);
+
+    rpc GetBlock(GetBlockReq) returns (GetBlockResp);
+//    rpc PublishBlock(PublishBlockReq) returns (PublishBlockResp);
+}
+
+// This service describes the Public API used by clients (wallet/cli/etc)
+service PublicAPI
+{
+    rpc GetNodeState (GetNodeStateReq) returns (GetNodeStateResp);
+    rpc GetKnownPeers (GetKnownPeersReq) returns (GetKnownPeersResp);
+
+    rpc GetStats (GetStatsReq) returns (GetStatsResp);
+    rpc GetAddressState (GetAddressStateReq) returns (GetAddressStateResp);
+    rpc GetObject(GetObjectReq) returns (GetObjectResp);
+
+    rpc GetLatestData(GetLatestDataReq) returns (GetLatestDataResp);
+
+    rpc GetStakers(GetStakersReq) returns (GetStakersResp);
+
+    rpc TransferCoins (TransferCoinsReq) returns (TransferCoinsResp);
+    rpc PushTransaction (PushTransactionReq) returns (PushTransactionResp);
+
+    rpc GetLatticePublicKeyTxn (LatticePublicKeyTxnReq) returns (TransferCoinsResp);
+
+    rpc GetTokenDetailedList (Empty) returns (TokenDetailedList);
+
+    rpc GetUnsignedTransaction (UnsignedTransactionReq) returns (UnsignedTransactionResp);
+}
+
+// This is a place holder for testing/instrumentation APIs
+service AdminAPI
+{
+    // FIXME: Use TLS and some signature scheme to validate the cli?
+    // At the moment, it will run locally
+    rpc GetLocalAddresses(GetLocalAddressesReq) returns (GetLocalAddressesResp);
+}
+
+////////////////////////////
+////////////////////////////
+////////////////////////////
+//    Request/Response    //
+////////////////////////////
+////////////////////////////
+////////////////////////////
+
+message Empty       { }
+
+message PingReq     { }
+message PongResp    { }
+
+message GetNodeStateReq { }
+message GetNodeStateResp {
+    NodeInfo info = 1;
+}
+
+message GetKnownPeersReq { }
+message GetKnownPeersResp {
+    NodeInfo node_info = 1;
+    repeated Peer known_peers = 2;
+}
+
+message GetBlockReq {
+    oneof query {
+        uint64 index = 1;               // Indicates the index number in mainchain
+        bytes after_hash = 2;           // request the node that comes after hash
+    }
+}
+message GetBlockResp {
+    NodeInfo node_info = 1;
+    Block block = 2;
+}
+
+////////////////////////////
+////////////////////////////
+////////////////////////////
+////////////////////////////
+////////////////////////////
+////////////////////////////
+////////////////////////////
+
+message GetStatsReq { }
+message GetStatsResp {
+    NodeInfo node_info = 1;
+    uint64 epoch = 2;                       // Current epoch
+    uint64 uptime_network = 3;              // Indicates uptime in seconds
+
+    uint64 stakers_count = 4;               // Number of active stakers
+    uint64 block_last_reward = 5;
+    uint64 block_time_mean = 6;
+    uint64 block_time_sd = 7;
+
+    uint64 coins_total_supply = 8;
+    uint64 coins_emitted = 9;
+    uint64 coins_atstake = 10;
+}
+
+message GetAddressStateReq {   bytes address = 1; }
+message GetAddressStateResp {
+    AddressState state = 1;
+}
+
+message GetObjectReq {  bytes query = 1;    }
+message GetObjectResp {
+    bool found = 1;
+    oneof result {
+        AddressState address_state = 2;
+        TransactionExtended transaction = 3;
+        Block block = 4;
+    }
+}
+
+message GetLatestDataReq {
+    enum Filter {
+        ALL = 0;
+        BLOCKHEADERS = 1;
+        TRANSACTIONS = 2;
+        TRANSACTIONS_UNCONFIRMED = 3;
+    }
+    Filter filter = 1;
+    uint32 offset = 2;                      // Offset in the result list (works backwards in this case)
+    uint32 quantity = 3;                    // Number of items to retrive. Capped at 100
+}
+
+message GetLatestDataResp {
+    repeated BlockHeaderExtended blockheaders = 1;
+    repeated TransactionExtended transactions = 2;
+    repeated TransactionExtended transactions_unconfirmed = 3;
+}
+
+message GetStakersReq {
+    enum Filter {
+        CURRENT = 0;
+        NEXT = 1;
+    }
+
+    Filter filter = 1;                      // Indicates which group of stakers (current / next)
+    uint32 offset = 2;                      // Offset in the staker list
+    uint32 quantity = 3;                    // Number of stakers to retrive. Capped at 100
+}
+
+message GetStakersResp {
+    repeated StakerData stakers = 1;
+}
+
+message UnsignedTransactionReq {
+    Transaction transaction = 1;
+}
+
+message UnsignedTransactionResp {
+    Transaction transaction = 1;
+}
+
+message TransferCoinsReq {
+    bytes address_from = 1;                 // Transaction source address
+    bytes address_to = 2;                   // Transaction destination address
+    uint64 amount = 3;                      // Amount. It should be expressed in Shor
+    uint64 fee = 4;                         // Fee. It should be expressed in Shor
+    bytes xmss_pk = 5;                      // XMSS Public key
+    uint64 xmss_ots_index = 6;              // XMSS One time signature index
+}
+message TransferCoinsResp {
+    Transaction transaction_unsigned = 1;
+}
+
+message LatticePublicKeyTxnReq {
+    bytes address_from = 1;
+    bytes kyber_pk = 2;
+    bytes tesla_pk = 3;
+    bytes xmss_pk = 4;
+    uint64 xmss_ots_index = 5;
+}
+
+message PushTransactionReq {    Transaction transaction_signed = 1;     }
+message PushTransactionResp {
+    string some_response = 1;
+}
+
+////////////////////////////
+////////////////////////////
+////////////////////////////
+////////////////////////////
+////////////////////////////
+////////////////////////////
+////////////////////////////
+
+message GetLocalAddressesReq { }
+message GetLocalAddressesResp
+{
+    repeated bytes addresses = 1;
+}
+
+message GetWalletReq
+{
+    bytes address = 1;
+}
+
+message GetWalletResp
+{
+    // FIXME: Encrypt
+    Wallet wallet = 1;
+}
+
+////////////////////////////
+////////////////////////////
+////////////////////////////
+//         Content        //
+////////////////////////////
+////////////////////////////
+////////////////////////////
+
+message NodeInfo
+{
+    enum State {
+        UNKNOWN = 0;
+        UNSYNCED = 1;
+        SYNCING = 2;
+        SYNCED = 3;
+        FORKED = 4;
+    }
+
+    string version = 1;
+    State  state = 2;
+    uint32 num_connections = 3;
+    uint32 num_known_peers = 4;
+    uint64 uptime = 5;               // Uptime in seconds
+    uint64 block_height = 6;
+    bytes  block_last_hash = 7;
+    bool   stake_enabled = 8;
+    string network_id = 9;
+}
+
+message WalletStore {
+    repeated Wallet wallets = 1;
+}
+
+message Wallet {
+    string address = 1;        // FIXME move to bytes
+    string mnemonic = 2;
+    int32 xmss_index = 3;
+}
+
+message StoredPeers {
+    repeated Peer peers = 1;
+}
+
+message Peer {
+    string ip = 1;
+}
+
+message AddressState {
+    bytes address = 1;
+    uint64 balance = 2;
+    uint64 nonce = 3;                           // FIXME: Discuss. 32 or 64 bits?
+    repeated bytes pubhashes = 4;
+    repeated bytes transaction_hashes = 5;
+    map<string, uint64> tokens = 6;
+}
+
+message StakerData {
+    AddressState address_state = 1;
+    bytes terminator_hash = 2;
+}
+
+message BlockHeader {
+    // Header
+    uint64 block_number = 1;
+    uint64 epoch = 2;
+    Timestamp timestamp = 3; // FIXME: Temporary
+
+    bytes hash_header = 4;
+    bytes hash_header_prev = 5;
+
+    uint64 reward_block = 6;
+    uint64 reward_fee = 7;
+
+    bytes merkle_root = 8;
+    bytes hash_reveal = 9;
+    bytes stake_selector = 10;
+}
+
+message BlockHeaderExtended {
+    BlockHeader header = 1;
+    TransactionCount transaction_count = 2;
+    uint64 voted_weight = 3;
+    uint64 total_stake_weight = 4;
+}
+
+message TransactionCount {
+    map<uint32, uint32> count = 1;
+}
+
+message TransactionExtended {
+    BlockHeader header = 1;
+    Transaction tx = 2;
+}
+
+message Block {
+    BlockHeader header = 1;
+    repeated Transaction transactions = 2;
+    repeated Transaction dup_transactions = 3;          // TODO: Review this
+    repeated Transaction vote = 4;
+
+    // This is only applicable to genesis blocks
+    repeated GenesisBalance genesis_balance = 5;
+}
+
+message BlockExtended {
+    Block block = 1;
+    uint64 voted_weight = 2;
+    uint64 total_stake_weight = 3;
+}
+
+message GenesisBalance
+{
+    string address = 1;                     // Address is string only here to increase visibility
+    uint64 balance = 2;
+}
+
+message BlockMetaDataList {
+    repeated BlockMetaData block_number_hashes = 1;
+}
+
+message BlockMetaData {
+    uint64 block_number = 1;
+    bytes hash_header = 2;
+}
+
+message MR {                                            // FIXME: This is legacy. Plan removal
+    bytes hash = 1;                                     // FIXME: rename this to block_headerhash
+    string type = 2;                                    // FIXME: type/string what is this
+    bytes stake_selector = 3;
+    uint64 block_number = 4;
+    bytes prev_headerhash = 5;
+    bytes reveal_hash = 6;
+}
+
+message AddressAmount {
+    bytes address = 1;
+    uint64 amount = 2;
+}
+
+message Transaction {
+    enum Type {
+        UNKNOWN = 0;
+        TRANSFER = 1;
+        STAKE = 2;
+        DESTAKE = 3;
+        COINBASE = 4;
+        LATTICE = 5;
+        DUPLICATE = 6;
+        VOTE = 7;
+        MESSAGE = 8;
+        TOKEN = 9;
+        TRANSFERTOKEN = 10;
+    }
+
+    Type type = 1;
+
+    uint64 nonce = 2;
+    bytes addr_from = 3;
+    bytes public_key = 4;
+    bytes transaction_hash = 5;
+    uint32 ots_key = 6;
+    bytes signature = 7;
+
+    oneof transactionType {
+        Transfer transfer = 8;
+        Stake stake = 9;
+        CoinBase coinbase = 10;
+        LatticePublicKey latticePK = 11;
+        Duplicate duplicate = 12;
+        Vote vote = 13;
+        Message message = 14;
+        Token token = 15;
+        TransferToken transfer_token = 16;
+    }
+
+    //////////
+    message Transfer {
+        bytes addr_to = 1;
+        uint64 amount = 2;
+        uint64 fee = 3;
+    }
+
+    message Stake {
+        uint64 activation_blocknumber = 1;
+        bytes slavePK = 2;
+        bytes hash = 3;
+    }
+
+    message Destake {
+    }
+
+    message CoinBase {
+        bytes addr_to = 1;
+        uint64 amount = 2;
+    }
+
+    message LatticePublicKey {
+        bytes kyber_pk = 1;
+        bytes tesla_pk = 2;
+    }
+
+    message Duplicate {
+        uint64 block_number = 1;
+        uint64 prev_header_hash = 2;
+        bytes coinbase1_hhash = 3;
+        bytes coinbase2_hhash = 4;
+        Transaction coinbase1 = 5;
+        Transaction coinbase2 = 6;
+    }
+
+    message Vote {
+        uint64 block_number = 1;
+        bytes hash_header = 2;
+    }
+
+    message Message {
+        bytes message_hash = 1;
+        uint64 fee=2;
+    }
+
+    message Token {
+        bytes symbol = 1;
+        bytes name = 2;
+        bytes owner = 3;
+        uint64 decimals = 4;
+        repeated AddressAmount initial_balances = 5;
+        uint64 fee = 6;
+    }
+
+    message TransferToken {
+        bytes token_txhash = 1;
+        bytes addr_to = 2;
+        uint64 amount = 3;
+        uint64 fee = 4;
+    }
+
+}
+
+message TokenList {
+    repeated bytes token_txhash = 1;
+}
+
+message TokenDetailedList {
+    repeated Transaction tokens = 1;
+}
+
+message TokenMetadata {
+    bytes token_txhash = 1;
+    repeated bytes transfer_token_tx_hashes = 2;
+}
+
+message EphemeralMessage {
+    bytes id = 1;
+    uint64 ttl = 2;
+    bytes data = 3;                 // Encrypted String containing aes256_symkey, prf512_seed, xmss_address, signature
+}
+
+message StakeValidator {
+    bytes address = 1;
+    bytes slave_public_key = 2;
+    bytes terminator_hash = 3;
+    uint64 balance = 4;
+    uint64 activation_blocknumber = 5;
+    uint64 nonce = 6;
+    bool is_banned = 7;
+    bool is_active = 8;
+}
+
+message StakeValidatorsList {
+    repeated StakeValidator stake_validators = 1;
+}
+
+message AddressList {
+    repeated bytes addresses = 1;
+}
+
+message StakeValidatorsTracker {
+    map<string, StakeValidator> sv_dict = 1;
+    map<string, StakeValidator> future_stake_addresses = 2;
+    map<uint64, AddressList> expiry = 3;
+    map<uint64, StakeValidatorsList> future_sv_dict = 4;
+    uint64 total_stake_amount = 5;
+}
