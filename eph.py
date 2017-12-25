@@ -174,7 +174,7 @@ def kyber_newkeys():
     kb = Kyb()
     return kb.SK, kb.PK             #returns kyber SK, kyber SK
 
-def kyber_encode_cypher(PK):
+def kyber_encode_cipher(PK):
     kb = Kyb()
     return kb.kem_encode(PK)        #returns encrypted cipher and shared secret
 
@@ -226,7 +226,7 @@ def dilithium_sign(SK, PK, message):                    #returns message, signat
     return message, signature, PK
 
 def dilithium_verify(message, signature, PK):           #returns True or False
-    ds = Dil(PK,SK)
+    ds = Dil(PK, SK)
     return ds.verify(message, signature, PK)
 
 
