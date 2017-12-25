@@ -226,7 +226,7 @@ def dilithium_sign(SK, PK, message):                    #returns message, signat
     return message, signature, PK
 
 def dilithium_verify(message, signature, PK):           #returns True or False
-    ds = Dil(PK, SK)
+    ds = Dil()
     return ds.verify(message, signature, PK)
 
 
