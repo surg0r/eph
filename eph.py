@@ -2,7 +2,7 @@
 
 import qrl_pb2, qrl_pb2_grpc
 import grpc
-from pyqrllib.pyqrllib import bin2hstr, hstr2bin, bin2mnemonic, sha2_256, ucharVector
+from pyqrllib.pyqrllib import bin2hstr, hstr2bin, bin2mnemonic, sha2_256, ucharVector, shake256
 from pyqrllib import pyqrllib
 from pyqrllib.kyber import Kyber
 from pyqrllib.dilithium import Dilithium
@@ -50,6 +50,14 @@ class Tree():
         return self.xmss.verify(tuple(message.encode()), hstr2bin(signature), PK)
 
 
+# prf
+
+def prf(seed, m, n, l):             # takes seed, feeds into shake256 and returns PRF sequence of l byte chunks from index m -> n (inclusive, exclusive)
+
+    return prf_output
+
+
+
 
 # grpc functions within a class
 
@@ -61,7 +69,6 @@ class Grpc():
         self.channel = grpc.insecure_channel(node)
         self.stub = qrl_pb2_grpc.PublicAPIStub(self.channel)
 
-
     def grpc_GetState(self):
         return self.stub.GetStats(qrl_pb2.GetStatsReq())
 
@@ -70,7 +77,13 @@ class Grpc():
         thashes = []
         for txh in addr.transaction_hashes:
             thashes.append(bin2hstr(txh))
-        return addr.address, addr.balance, addr.nonce,  thashes
+        if not hasattr(addr, 'latticePK'):
+            return addr.address, addr.balance, addr.nonce, thashes
+        lat_data = []
+        for lxh in addr.latticePK:
+            lat_data.append(lxh)
+        return addr.address, addr.balance, addr.nonce, thashes, lat_data
+
 
     def grpc_GetKnownPeers(self):
         knownpeers = stub.GetKnownPeers(qrl_pb2.GetKnownPeersReq())
@@ -89,6 +102,21 @@ class Grpc():
     def grpc_PushTransaction(self, tx_obj):
         response = self.stub.PushTransaction(qrl_pb2.PushTransactionReq(transaction_signed=tx_obj))
         return response
+
+# open channel
+
+def grpc_connect(node='104.251.219.145:9009'):
+    return Grpc(node)
+
+# straight call to a new channel..to be removed after testing..
+
+def grpc_GetAddressState(address, node='104.251.219.145:9009'):
+    g = Grpc(node=node)
+    return g.grpc_GetAddressState(address)      #returns addr.address, addr.balance, addr.nonce, transaction hashes []
+
+def grpc_PushTransaction(tx_obj, node='104.251.219.145:9009'):               #returns response
+    g = Grpc(node=node)
+    return grpc_PushTransaction(tx_obj)
 
 
 
@@ -178,7 +206,6 @@ def kyber_encode_cipher(PK):
     kb = Kyb()
     return kb.kem_encode(PK)        #returns encrypted cipher and shared secret
 
-
 def kyber_decode_cipher(ciphertext, SK, PK):          #returns false or shared secret
     kb = Kyb(PK, SK)
     return kb.kem_decode(ciphertext)
@@ -232,12 +259,60 @@ def dilithium_verify(message, signature, PK):           #returns True or False
 
 
 
-#ephemeral suprafunctions
+# functions which glom together the above to actually do useful things
+
+"""To send a valid transfer_tx to the network..
+1. take seed and generate xmss tree, address, etc
+2. query address_state to get last index in chain, confirm sufficient balance, etc
+3. create signed transfer_tx_object
+4. push tx through grpc
+"""
+
+def push_transfer_tx(channel, addr_to, amount= None, fee=None, seed=None, tree_obj=None):
+    if tree_obj != None:
+        pass
+    else:
+        tree_obj = Tree(seed=seed, height=10)
+    state = channel.grpc_GetAddressState(tree_obj.address)
+    index = state[2]
+    tree_obj.set_index(index)                  # set ots_key from chain
+    balance = state[1]
+    if fee == None:
+        fee = 0
+    if amount >= balance-fee:           # must be sufficient balance..
+        return False
+    return channel.grpc_PushTransaction(transfer_tx_object(tree_obj=tree_obj, addr_to=addr_to, amount=amount, fee=fee))
+
+
+"""To send a valid lattice_tx to the network..
+1. take seed and generate xmss tree, address, etc
+2. check last used index from the chain
+2. create signed lattice_tx_object using supplied keys
+3. push tx through grpc
+"""
+
+def push_lattice_tx(kyber_pk, dilithium_pk, fee=None, seed=None, tree_obj=None):
+    if tree_obj != None:
+        pass
+    else:
+        tree_obj = Tree(seed=seed, height=10)
+    state = channel.grpc_GetAddressState(tree_obj.address)
+    index = state[2]
+    tree_obj.set_index(index)                  # set ots_key from chain
+    return channel.grpc_PushTransaction(lattice_tx_object(tree_obj=tree_obj, kyber_pk=kyber_pk, dilithium_pk=dilithium_pk))
+
+
+def generate_lattice_keys():                            #from random entropy (update from seed)
+    dilithium_sk, dilithium_pk = dilithium_newkeys()
+    kyber_sk, kyber_pk = kyber_newkeys()
+    return kyber_sk, kyber_pk, dilithium_sk, dilithium_pk
+
+
+# ephemeral suprafunctions
 
 class Eph():
     def __init__(self):
         pass
-
 
     def eph_open_channel():
         return
@@ -255,10 +330,15 @@ data blob = {fill in details}
 """
 
 
-
 if __name__ == '__main__':
 
-    pass
+    channel = grpc_connect()
+    seed = useed()
+    t = Tree()
+    print(seed)
+    print(push_transfer_tx(channel, addr_to='Q812f28a47f041be3509f4154a9a9c87b56871576b4a4ba75d5975fc46213d87449bf6dac', amount=10000000, tree_obj=t))
+
+
     #stub = grpc_connect('104.251.219.145:9009')
 
     #print(grpc_GetObject('6cf0a5932b338441f8f7f3ea470e711b4fe48b626135a6af364fa45b302f3c10'))
