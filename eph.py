@@ -181,7 +181,7 @@ def kyber_encode_cipher(PK):
 
 def kyber_decode_cipher(ciphertext, SK, PK):          #returns false or shared secret
     kb = Kyb(PK, SK)
-    return kb.decode(ciphertext)
+    return kb.kem_decode(ciphertext)
 
 
 
