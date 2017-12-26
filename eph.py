@@ -74,15 +74,7 @@ class Grpc():
 
     def grpc_GetAddressState(self, address):
         addr = self.stub.GetAddressState(qrl_pb2.GetAddressStateReq(address=address.encode())).state
-        thashes = []
-        for txh in addr.transaction_hashes:
-            thashes.append(bin2hstr(txh))
-        if not hasattr(addr, 'latticePK'):
-            return addr.address, addr.balance, addr.nonce, thashes
-        lat_data = []
-        for lxh in addr.latticePK:
-            lat_data.append(lxh)
-        return addr.address, addr.balance, addr.nonce, thashes, lat_data
+        return addr
 
 
     def grpc_GetKnownPeers(self):
@@ -121,7 +113,7 @@ def grpc_PushTransaction(tx_obj, node='104.251.219.145:9009'):               #re
 
 
 
-# tx functions
+# tx/msg functions
 
 """Minor changes to improve Transaction inheritance planned which will alter both of these functions slightly"""
 
@@ -142,7 +134,7 @@ def transfer_tx_object(tree_obj, addr_to, amount=None, fee=None):       #instant
 
 # lattice
 
-def lattice_tx_object(tree_obj, kyber_pk, dilithium_pk):                                        #instantiate a Tree() first using seed..
+def lattice_tx_object(tree_obj, kyber_pk, dilithium_pk, fee=None):                                        #instantiate a Tree() first using seed..
     tx = qrl_pb2.Transaction()
     tx.type = 5
     tx.public_key = bytes(tree_obj.PK)
@@ -157,8 +149,16 @@ def lattice_tx_object(tree_obj, kyber_pk, dilithium_pk):                        
     tx.signature = tree_obj.sign(tx.transaction_hash)
     return tx
 
+# ephemeral
 
-
+def ephemeral_msg_object(id, ttl, ttr=None, pow_nonce, data):
+    eph = qrl_pb2.EphemeralMessage()
+    eph.id = id
+    eph.ttl = ttl
+    eph.ttr = ttr
+    eph.pow_nonce = pow_nonce
+    eph.data = data
+    return eph
 
 # misc functions
 
@@ -274,9 +274,9 @@ def push_transfer_tx(channel, addr_to, amount= None, fee=None, seed=None, tree_o
     else:
         tree_obj = Tree(seed=seed, height=10)
     state = channel.grpc_GetAddressState(tree_obj.address)
-    index = state[2]
+    index = state.nonce
     tree_obj.set_index(index)                  # set ots_key from chain
-    balance = state[1]
+    balance = state.balance
     if fee == None:
         fee = 0
     if amount >= balance-fee:           # must be sufficient balance..
@@ -291,15 +291,15 @@ def push_transfer_tx(channel, addr_to, amount= None, fee=None, seed=None, tree_o
 3. push tx through grpc
 """
 
-def push_lattice_tx(kyber_pk, dilithium_pk, fee=None, seed=None, tree_obj=None):
+def push_lattice_tx(channel, kyber_pk, dilithium_pk, fee=None, seed=None, tree_obj=None):
     if tree_obj != None:
         pass
     else:
         tree_obj = Tree(seed=seed, height=10)
     state = channel.grpc_GetAddressState(tree_obj.address)
-    index = state[2]
+    index = state.nonce
     tree_obj.set_index(index)                  # set ots_key from chain
-    return channel.grpc_PushTransaction(lattice_tx_object(tree_obj=tree_obj, kyber_pk=kyber_pk, dilithium_pk=dilithium_pk))
+    return channel.grpc_PushTransaction(lattice_tx_object(tree_obj=tree_obj, kyber_pk=kyber_pk, dilithium_pk=dilithium_pk, fee=fee))
 
 
 def generate_lattice_keys():                            #from random entropy (update from seed)
@@ -308,31 +308,106 @@ def generate_lattice_keys():                            #from random entropy (up
     return kyber_sk, kyber_pk, dilithium_sk, dilithium_pk
 
 
-# ephemeral suprafunctions
+def address_lattice_keys(channel, address):             #return the txhash, lattice keypairs for each channel associated with an address
+    state = channel.grpc_GetAddressState(address)
+    if not hasattr(state, 'latticePK'):
+        return False
+    #print(state)
+    return state.latticePK
+
+
+# ephemeral
+
+
+class Far():
+    def __init__(self, address, grpc_channel):
+        self.address = address
+        self.latticePK = address_lattice_keys(channel=grpc_channel, address=self.address)
+        if self.latticePK is not False:
+            self.txhash = self.latticePK[0][0]
+            self.kyber_pk = self.latticePK[0][1]
+            self.dilithium_pk = self.latticePK[0][2]
+            self.open = True
+        else:
+            self.open = False
+
 
 class Eph():
-    def __init__(self):
-        pass
+    def __init__(self, address, grpc_channel, seed=None, tree_obj=None):
+        far = Far(address=address, grpc_channel=grpc_channel)
+        self.far = far
+        if far.open == False:
+            print('address:',address, 'closed')
+            return
+        print('address:', address, 'open')
 
-    def eph_open_channel():
+        # once we have data persistence remove this and call separately only for new..
+        self.new_Near(grpc_channel=grpc_channel, far_obj=far, seed=seed, tree_obj=tree_obj)
+
+
+    def new_Near(self, grpc_channel, far_obj, seed=None, tree_obj=None):
+        if tree_obj != None:
+            pass
+        else:
+            tree_obj = Tree(seed=seed, height=10)
+        self.address = tree_obj.address
+        self.seed = tree_obj.seed
+        self.tree_obj = tree_obj
+        self.kyber_sk, self.kyber_pk, self.dilithium_sk, self.dilithium_pk = generate_lattice_keys()
+        push_lattice_tx(channel=grpc_channel, kyber_pk=self.kyber_pk, dilithium_pk=self.dilithium_pk, tree_obj=self.tree_obj)
+
+        self.prf = useed()
+        self.prf_alice = 0
+        self.prf_bob = 0
+        self.cipher, self.shared_secret = kyber_encode_cipher(self.far.kyber_pk)
+
+    def open_channel(self):
+        ttl = 1527897600
+        ttr = 1514247867
+        pow_nonce = None
+
+        # data blob format: {self.ciphertext, aes_encrypted(self.shared_secret) { prf_seed, qrl_address, dilithium signature, data}
+
+        blob = None
+
+        m, s, pk = dilithium_sign(self.dilithium_sk, self.dilithium_pk, blob)
+
+
+
+        self.openmsg = ephemeral_msg_object(id=self.txhash, ttl=ttl, ttr=None, pow_nonce=pow_nonce, data=blob)
+
+
+
+        # push to network via grpc call
+
         return
 
-"""To dial up and open an ephemeral channel between Alice and Bob it is necessary to perform
-1. GetAddressState for the QRL address (Bob) to obtain a lattice key tx
-2. identify a txhash and corresponding kyber/dilithium pk
-3. GetAddressState for my QRL address (Alice) to obtain lattice key tx
-4. identify txhash, corresponding kyber/dilithium pk
-5. choose corresponding local dilithium sk.
-6. create a random AES symmkey to be shared between Alice and Bob.
-7. construct Ephemeral message, id=txhash above, TTL = timestamp in future, TTR = time in the past, pow_nonce = urandom(32)
-data blob = {fill in details}
-8. PushTransactionReq, get Resp
-"""
+    def collect_messages(self):
+        pass
+
+        # prf sequence, alice odd, Bob even values..
+
+        # spread message request over multiple channels
+
+
+
+    def send_message(self):
+        pass
+
+        # construct via ephemeral_msg_object()
+
+    
+
+
+
 
 
 if __name__ == '__main__':
 
     channel = grpc_connect()
+
+    print(address_lattice_keys(channel, 'Q812f28a47f041be3509f4154a9a9c87b56871576b4a4ba75d5975fc46213d87449bf6dac'))
+
     seed = useed()
     t = Tree()
     print(seed)
